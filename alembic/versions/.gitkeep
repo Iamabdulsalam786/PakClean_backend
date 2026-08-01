@@ -1,0 +1,2 @@
+# Keeps the versions/ directory in git when it has no migrations yet.
+# Real migration files (*.py) will live beside this file and SHOULD be committed.

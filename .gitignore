@@ -1,0 +1,46 @@
+# Virtual environment – never commit installed packages
+.venv/
+venv/
+env/
+
+# Local secrets – copy from .env.example instead
+.env
+.env.local
+.env.*.local
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging (if you ever build a wheel)
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / coverage / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs and local dumps
+*.log
+*.sqlite3
+
+# Alembic can generate these locally; keep versions/ in git, ignore editor junk if any
+# (migrations themselves WILL be committed)

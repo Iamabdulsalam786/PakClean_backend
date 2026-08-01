@@ -1,0 +1,33 @@
+# Pak Clean API – Phase 1 Python dependencies
+# Install (from pak-clean-backend, with venv active):
+#   python -m venv .venv
+#   .venv\Scripts\activate
+#   pip install -r requirements.txt
+#
+# Pin minors for reproducible installs; bump intentionally later.
+
+# Web framework + ASGI server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Settings / validation (FastAPI already depends on pydantic; settings is separate)
+pydantic-settings==2.7.1
+
+# Database
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3
+alembic==1.14.0
+
+# Auth
+python-jose[cryptography]==3.3.0
+bcrypt==4.2.1
+
+# Env file loading is handled by pydantic-settings; python-dotenv is a transitive helper
+# but we pin it so behavior is explicit if anything imports it directly.
+python-dotenv==1.0.1
+
+# Required by Pydantic EmailStr
+email-validator==2.2.0
+
+# Required for OAuth2PasswordRequestForm / form body parsing
+python-multipart==0.0.20
