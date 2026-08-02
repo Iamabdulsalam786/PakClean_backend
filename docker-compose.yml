@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pakclean-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pakclean
+      POSTGRES_PASSWORD: pakclean
+      POSTGRES_DB: pakclean
+    ports:
+      - '5432:5432'
+    volumes:
+      - pakclean_pg_data:/var/lib/postgresql/data
+
+volumes:
+  pakclean_pg_data:
