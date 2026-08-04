@@ -54,6 +54,24 @@ class Settings(BaseSettings):
     )
     algorithm: str = Field(default="HS256", alias="ALGORITHM")
 
+    # --- Email / SMTP (Gmail App Password in development) ---
+    # Optional at startup so the API can boot before mail is configured.
+    # SmtpEmailSender wiring must still validate these before sending.
+    smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str = Field(default="", alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    email_from: str = Field(default="", alias="EMAIL_FROM")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+
+    # OTP policy (centralized so services don't hardcode magic numbers)
+    otp_expire_minutes: int = Field(default=5, alias="OTP_EXPIRE_MINUTES")
+    otp_resend_cooldown_seconds: int = Field(
+        default=60,
+        alias="OTP_RESEND_COOLDOWN_SECONDS",
+    )
+    otp_max_attempts: int = Field(default=5, alias="OTP_MAX_ATTEMPTS")
+
     # --- CORS ---
     # Stored as a raw comma-separated string in .env; exposed as a list via property.
     cors_origins_raw: str = Field(

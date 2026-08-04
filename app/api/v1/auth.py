@@ -1,134 +1,145 @@
 """
-Auth HTTP endpoints: register, login, email OTP, and current user profile.
+Auth HTTP endpoints — email-verified registration flow.
+
+Thin controllers: validate via schemas, call AuthVerificationService, map errors → HTTP.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 
+from app.core.auth_exceptions import AuthDomainError
 from app.core.dependencies import CurrentUser, DbSession
-from app.schemas.auth import Token, UserLogin, UserRead, UserRegister
-from app.schemas.otp import OtpRequest, OtpRequestResponse, OtpVerify, OtpVerifyResponse
-from app.services.auth_service import AuthError, authenticate_user, register_user
-from app.services.otp_service import OtpError, request_email_otp, verify_email_otp
+from app.schemas.auth import (
+    MessageResponse,
+    RefreshRequest,
+    RefreshResponse,
+    RegisterResponse,
+    ResendOtpRequest,
+    TokenPair,
+    UserLogin,
+    UserRead,
+    UserRegister,
+    VerifyOtpRequest,
+)
+from app.services.auth_verification_service import AuthVerificationService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _http_for_auth_error(exc: AuthError) -> HTTPException:
-    """Map domain AuthError codes to HTTP status codes."""
-    if exc.code in {"email_taken", "phone_taken"}:
+def _http_for_domain_error(exc: AuthDomainError) -> HTTPException:
+    """Map AuthDomainError.code → HTTP status."""
+    code = exc.code
+    if code in {"email_taken", "phone_taken"}:
         status_code = status.HTTP_409_CONFLICT
-    elif exc.code == "inactive_user":
+    elif code in {"email_not_verified", "inactive_user"}:
         status_code = status.HTTP_403_FORBIDDEN
-    elif exc.code == "invalid_role":
-        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
-    else:
-        # invalid_credentials and anything unexpected → 401
+    elif code in {"otp_resend_cooldown", "otp_attempts_exceeded"}:
+        status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    elif code == "email_delivery_failed":
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    elif code in {"invalid_otp", "invalid_role"}:
+        status_code = (
+            status.HTTP_422_UNPROCESSABLE_ENTITY
+            if code == "invalid_role"
+            else status.HTTP_400_BAD_REQUEST
+        )
+    elif code in {"invalid_credentials", "invalid_refresh_token"}:
         status_code = status.HTTP_401_UNAUTHORIZED
-    return HTTPException(status_code=status_code, detail=exc.message)
-
-
-def _http_for_otp_error(exc: OtpError) -> HTTPException:
-    """Map domain OtpError codes to HTTP status codes."""
-    if exc.code == "otp_cooldown":
-        status_code = status.HTTP_429_TOO_MANY_REQUESTS
-    elif exc.code == "otp_locked":
-        status_code = status.HTTP_429_TOO_MANY_REQUESTS
-    elif exc.code == "inactive_user":
-        status_code = status.HTTP_403_FORBIDDEN
-    elif exc.code == "invalid_role":
-        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     else:
-        # otp_invalid and unknown → 400 (bad code / expired)
         status_code = status.HTTP_400_BAD_REQUEST
     return HTTPException(status_code=status_code, detail=exc.message)
 
 
+def _service(db: DbSession) -> AuthVerificationService:
+    return AuthVerificationService(db)
+
+
 @router.post(
     "/register",
-    response_model=Token,
+    response_model=RegisterResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Register a customer or provider",
+    summary="Register customer or provider (sends email OTP)",
 )
-def register(payload: UserRegister, db: DbSession) -> Token:
+def register(payload: UserRegister, db: DbSession) -> RegisterResponse:
     """
-    Create a customer or provider account and return an access token.
+    Create unverified account and email a 6-digit OTP.
 
-    Pass `"role": "provider"` for service providers; default is customer.
-    Admin cannot be created through this endpoint.
+    Does not return JWT — client must call /auth/verify-otp next.
     """
     try:
-        _user, token = register_user(db, payload)
-    except AuthError as exc:
-        raise _http_for_auth_error(exc) from exc
-    return token
+        return _service(db).register(payload)
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
+
+
+@router.post(
+    "/verify-otp",
+    response_model=TokenPair,
+    summary="Verify email OTP and issue tokens",
+)
+def verify_otp(payload: VerifyOtpRequest, db: DbSession) -> TokenPair:
+    """Marks OTP used, sets is_verified=true, returns access + refresh tokens."""
+    try:
+        return _service(db).verify_otp(email=str(payload.email), code=payload.code)
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
+
+
+@router.post(
+    "/resend-otp",
+    response_model=MessageResponse,
+    summary="Resend email OTP (60s cooldown)",
+)
+def resend_otp(payload: ResendOtpRequest, db: DbSession) -> MessageResponse:
+    """Invalidates previous OTPs and emails a new code."""
+    try:
+        message = _service(db).resend_otp(email=str(payload.email))
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
+    return MessageResponse(message=message)
 
 
 @router.post(
     "/login",
-    response_model=Token,
-    summary="Login with email and password (JSON)",
+    response_model=TokenPair,
+    summary="Login with email and password",
 )
-def login_json(payload: UserLogin, db: DbSession) -> Token:
-    """JSON login for React Native / normal API clients."""
+def login_json(payload: UserLogin, db: DbSession) -> TokenPair:
+    """Requires is_verified=true. Returns access + refresh tokens."""
     try:
-        _user, token = authenticate_user(db, payload.email, payload.password)
-    except AuthError as exc:
-        raise _http_for_auth_error(exc) from exc
-    return token
+        return _service(db).login(payload)
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
 
 
 @router.post(
     "/login/form",
-    response_model=Token,
+    response_model=TokenPair,
     summary="Login (OAuth2 form) for Swagger Authorize",
-    include_in_schema=True,
 )
 def login_form(
     db: DbSession,
     form_data: OAuth2PasswordRequestForm = Depends(),
-) -> Token:
-    """
-    Form-encoded login used by Swagger UI's Authorize button.
-
-    OAuth2PasswordRequestForm provides `username` + `password`.
-    We treat `username` as the user's email.
-    """
+) -> TokenPair:
+    """Swagger Authorize helper — username field is the email."""
     try:
-        _user, token = authenticate_user(db, form_data.username, form_data.password)
-    except AuthError as exc:
-        raise _http_for_auth_error(exc) from exc
-    return token
+        return _service(db).login(
+            UserLogin(email=form_data.username, password=form_data.password)
+        )
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
 
 
 @router.post(
-    "/otp/request",
-    response_model=OtpRequestResponse,
-    summary="Request an email OTP",
+    "/refresh",
+    response_model=RefreshResponse,
+    summary="Rotate refresh token and get a new access token",
 )
-def otp_request(payload: OtpRequest, db: DbSession) -> OtpRequestResponse:
-    """
-    Send a 6-digit code to the email (logged + optional dev_code when DEBUG=true).
-    """
+def refresh_tokens(payload: RefreshRequest, db: DbSession) -> RefreshResponse:
     try:
-        return request_email_otp(db, payload.email)
-    except OtpError as exc:
-        raise _http_for_otp_error(exc) from exc
-
-
-@router.post(
-    "/otp/verify",
-    response_model=OtpVerifyResponse,
-    summary="Verify email OTP and get access token",
-)
-def otp_verify(payload: OtpVerify, db: DbSession) -> OtpVerifyResponse:
-    """
-    Verify the code. Creates a customer or provider if the email is new.
-    """
-    try:
-        return verify_email_otp(db, payload.email, payload.code, role=payload.role)
-    except OtpError as exc:
-        raise _http_for_otp_error(exc) from exc
+        return _service(db).refresh(payload.refresh_token)
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
 
 
 @router.get(

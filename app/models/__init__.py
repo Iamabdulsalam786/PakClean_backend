@@ -7,6 +7,8 @@ Import every model here so Alembic (and app startup) register tables on Base.met
 from app.models.booking import Booking, BookingStatus
 from app.models.category import Category
 from app.models.otp import OtpChallenge
+from app.models.otp_code import OtpCode
+from app.models.refresh_token import RefreshToken
 from app.models.service import Service
 from app.models.user import User, UserRole
 
@@ -15,6 +17,8 @@ __all__ = [
     "BookingStatus",
     "Category",
     "OtpChallenge",
+    "OtpCode",
+    "RefreshToken",
     "Service",
     "User",
     "UserRole",

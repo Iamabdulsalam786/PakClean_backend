@@ -1,10 +1,11 @@
 """
 User model — identity for customers, providers, and admins.
 
-Phase 1 design:
-  - One users table; role decides permissions
-  - Providers get a separate ProviderProfile later (skills, verification, location)
-  - Passwords are stored hashed only (see app.core.security later)
+Auth redesign:
+  - Register creates users with is_verified=False until email OTP succeeds
+  - Login must reject unverified accounts
+  - role supports the mobile signup toggle (customer | provider)
+  - Passwords are stored hashed only (never plaintext)
 """
 
 import enum
@@ -50,7 +51,8 @@ class User(Base):
         nullable=False,
     )
 
-    # Optional in Phase 1; phone OTP / unique constraint can tighten later.
+    # Required on the mobile signup form; nullable in DB for legacy/OTP-only rows.
+    # Uniqueness still enforced when phone is present (Postgres allows multiple NULLs).
     phone: Mapped[str | None] = mapped_column(
         String(20),
         unique=True,
@@ -80,6 +82,15 @@ class User(Base):
         index=True,
     )
 
+    # False until POST /auth/verify-otp succeeds. Login must check this flag.
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        index=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -101,4 +112,7 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User id={self.id} email={self.email!r} role={self.role}>"
+        return (
+            f"<User id={self.id} email={self.email!r} "
+            f"role={self.role} verified={self.is_verified}>"
+        )
