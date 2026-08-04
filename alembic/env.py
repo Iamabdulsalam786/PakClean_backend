@@ -21,7 +21,7 @@ from app.db.base import Base
 
 # Import models package so each model class registers on Base.metadata.
 # Without this, autogenerate would see an empty schema and drop/create nothing useful.
-from app.models import User  # noqa: F401
+from app.models import Booking, Category, OtpChallenge, Service, User  # noqa: F401
 
 # Alembic Config object — reads alembic.ini
 config = context.config

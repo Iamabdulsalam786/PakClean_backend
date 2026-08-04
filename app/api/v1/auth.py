@@ -20,6 +20,8 @@ def _http_for_auth_error(exc: AuthError) -> HTTPException:
         status_code = status.HTTP_409_CONFLICT
     elif exc.code == "inactive_user":
         status_code = status.HTTP_403_FORBIDDEN
+    elif exc.code == "invalid_role":
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     else:
         # invalid_credentials and anything unexpected → 401
         status_code = status.HTTP_401_UNAUTHORIZED
@@ -34,6 +36,8 @@ def _http_for_otp_error(exc: OtpError) -> HTTPException:
         status_code = status.HTTP_429_TOO_MANY_REQUESTS
     elif exc.code == "inactive_user":
         status_code = status.HTTP_403_FORBIDDEN
+    elif exc.code == "invalid_role":
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     else:
         # otp_invalid and unknown → 400 (bad code / expired)
         status_code = status.HTTP_400_BAD_REQUEST
@@ -44,13 +48,14 @@ def _http_for_otp_error(exc: OtpError) -> HTTPException:
     "/register",
     response_model=Token,
     status_code=status.HTTP_201_CREATED,
-    summary="Register a new customer",
+    summary="Register a customer or provider",
 )
 def register(payload: UserRegister, db: DbSession) -> Token:
     """
-    Create a customer account and return an access token.
+    Create a customer or provider account and return an access token.
 
-    The mobile app can store the token and call protected routes immediately.
+    Pass `"role": "provider"` for service providers; default is customer.
+    Admin cannot be created through this endpoint.
     """
     try:
         _user, token = register_user(db, payload)
@@ -118,10 +123,10 @@ def otp_request(payload: OtpRequest, db: DbSession) -> OtpRequestResponse:
 )
 def otp_verify(payload: OtpVerify, db: DbSession) -> OtpVerifyResponse:
     """
-    Verify the code. Creates a customer account if the email is new.
+    Verify the code. Creates a customer or provider if the email is new.
     """
     try:
-        return verify_email_otp(db, payload.email, payload.code)
+        return verify_email_otp(db, payload.email, payload.code, role=payload.role)
     except OtpError as exc:
         raise _http_for_otp_error(exc) from exc
 

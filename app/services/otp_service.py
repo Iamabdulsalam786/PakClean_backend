@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.otp import OtpChallenge
 from app.models.user import User, UserRole
+from app.schemas.auth import PUBLIC_ROLES
 from app.schemas.otp import OtpRequestResponse, OtpVerifyResponse
 
 logger = logging.getLogger(__name__)
@@ -90,10 +91,21 @@ def request_email_otp(db: Session, email: str) -> OtpRequestResponse:
     )
 
 
-def verify_email_otp(db: Session, email: str, code: str) -> OtpVerifyResponse:
+def verify_email_otp(
+    db: Session,
+    email: str,
+    code: str,
+    *,
+    role: UserRole = UserRole.CUSTOMER,
+) -> OtpVerifyResponse:
     """
-    Validate OTP, create user if needed, return access token.
+    Validate OTP, create user if needed (customer or provider), return access token.
+
+    `role` is used only when creating a new account; existing users keep their role.
     """
+    if role not in PUBLIC_ROLES:
+        raise OtpError("Invalid role for registration", code="invalid_role")
+
     normalized = email.lower().strip()
     now = datetime.now(timezone.utc)
 
@@ -116,13 +128,13 @@ def verify_email_otp(db: Session, email: str, code: str) -> OtpVerifyResponse:
     user = db.scalar(select(User).where(User.email == normalized))
     is_new_user = False
     if user is None:
-        # OTP login can onboard a customer without a password.
+        # OTP can onboard customer or provider without a password.
         local_part = normalized.split("@", maxsplit=1)[0] or "User"
         user = User(
             email=normalized,
             full_name=local_part[:150],
             hashed_password=None,
-            role=UserRole.CUSTOMER,
+            role=role,
             is_active=True,
         )
         db.add(user)
@@ -142,5 +154,6 @@ def verify_email_otp(db: Session, email: str, code: str) -> OtpVerifyResponse:
     )
     return OtpVerifyResponse(
         access_token=token,
+        role=user.role,
         is_new_user=is_new_user,
     )

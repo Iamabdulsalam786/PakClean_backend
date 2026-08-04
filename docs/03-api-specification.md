@@ -41,7 +41,8 @@ Register customer with email/password. Returns JWT.
   "email": "user@example.com",
   "password": "12345678",
   "full_name": "Daniyal",
-  "phone": "03424834128"
+  "phone": "03424834128",
+  "role": "customer"
 }
 ```
 
@@ -51,13 +52,15 @@ Register customer with email/password. Returns JWT.
 | `password` | yes | 8–128 chars |
 | `full_name` | yes | 2–150 chars |
 | `phone` | no | max 20 |
+| `role` | no | `customer` (default) or `provider` — not `admin` |
 
 **Response `201`**
 
 ```json
 {
   "access_token": "<jwt>",
-  "token_type": "bearer"
+  "token_type": "bearer",
+  "role": "customer"
 }
 ```
 
@@ -90,7 +93,8 @@ JSON login for mobile/clients.
 ```json
 {
   "access_token": "<jwt>",
-  "token_type": "bearer"
+  "token_type": "bearer",
+  "role": "provider"
 }
 ```
 
@@ -154,7 +158,7 @@ Request email OTP.
 
 ### `POST /api/v1/auth/otp/verify`
 
-Verify OTP; create customer if new; return JWT.
+Verify OTP; create customer or provider if new; return JWT.
 
 **Auth:** None  
 
@@ -163,13 +167,15 @@ Verify OTP; create customer if new; return JWT.
 ```json
 {
   "email": "user@example.com",
-  "code": "483920"
+  "code": "483920",
+  "role": "provider"
 }
 ```
 
 | Field | Rules |
 |-------|--------|
 | `code` | Exactly 6 digits |
+| `role` | Optional; `customer` (default) or `provider`; used **only** for new accounts |
 
 **Response `200`**
 
@@ -177,7 +183,8 @@ Verify OTP; create customer if new; return JWT.
 {
   "access_token": "<jwt>",
   "token_type": "bearer",
-  "is_new_user": false
+  "role": "provider",
+  "is_new_user": true
 }
 ```
 

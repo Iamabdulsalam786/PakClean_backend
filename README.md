@@ -25,6 +25,16 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 - `POST /api/v1/auth/otp/verify` — verify OTP → JWT
 - `GET /api/v1/auth/me` — current user (Bearer token)
 
+## Admin bootstrap
+
+Create the first admin user (or promote an existing user to admin):
+
+```powershell
+python -m scripts.bootstrap_admin --email admin@example.com --password "StrongPass123" --full-name "Pak Clean Admin"
+```
+
+Then login via `POST /api/v1/auth/login` and use admin-only endpoints.
+
 ## Deploy (Render)
 
 See `render.yaml`. Connect this repo as a Blueprint, or set the Web Service root to this project and run:
