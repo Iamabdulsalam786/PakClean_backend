@@ -90,12 +90,45 @@ python -m scripts.bootstrap_admin --email admin@example.com --password "StrongPa
 
 Then login via `POST /api/v1/auth/login` and use admin-only endpoints.
 
-## Deploy (Render)
+## Deploy (Render) — for a remote frontend teammate
 
-See `render.yaml`. Connect this repo as a Blueprint, or set the Web Service root to this project and run:
+Your friend cannot use `localhost`. They need a **public HTTPS URL**.
+
+### Option A — Render (stable)
+
+1. Open [https://dashboard.render.com](https://dashboard.render.com) and sign in with GitHub.
+2. **New → Blueprint** → select `DaniyalQais/Pak-clean-app` (or the team repo).
+3. Set **Root Directory** to empty if that repo *is* `pak-clean-backend`, or `pak-clean-backend` if the GitHub root is the parent folder.
+4. Branch: `daniyal-api`.
+5. Apply the Blueprint (`render.yaml` creates Postgres + web service).
+6. In the web service → **Environment**, set (private — not in git):
+   - `SMTP_USERNAME` = `pakclean.app@gmail.com`
+   - `SMTP_PASSWORD` = your Gmail App Password
+   - `EMAIL_FROM` = `pakclean.app@gmail.com`
+7. After deploy succeeds, copy the service URL, e.g. `https://pak-clean-api.onrender.com`.
+8. Send your friend **only**:
+   - Base URL: `https://pak-clean-api.onrender.com`
+   - Docs: `https://pak-clean-api.onrender.com/docs`
+   - This README’s Frontend integration section
+
+Smoke-test after deploy: open `/health` then register with a real email.
+
+**Note:** Render may ask for a payment method even on free tiers. If blocked, use Option B temporarily.
+
+### Option B — ngrok tunnel (quick, while you keep PC on)
+
+```powershell
+# Terminal 1 — API
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 2 — public tunnel (install ngrok first)
+ngrok http 8000
+```
+
+Share the `https://....ngrok-free.app` URL with your friend. It changes when you restart unless you use a reserved domain.
+
+### Deploy commands (already in `render.yaml`)
 
 - Build: `pip install -r requirements.txt`
 - Pre-deploy: `alembic upgrade head`
 - Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-
-Set SMTP and DB env vars in the Render dashboard (not in git).
