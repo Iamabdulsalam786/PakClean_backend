@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
+from app.integrations.email import get_email_provider_status
 
 
 def create_app() -> FastAPI:
@@ -52,6 +53,11 @@ def create_app() -> FastAPI:
             "app": settings.app_name,
             "env": settings.app_env,
         }
+
+    @application.get("/health/email", tags=["system"])
+    def email_health() -> dict[str, object]:
+        """Shows whether real email delivery is configured (dev helper)."""
+        return get_email_provider_status()
 
     # Mount all versioned API routes under /api/v1 (see settings.api_v1_prefix).
     application.include_router(api_v1_router, prefix=settings.api_v1_prefix)

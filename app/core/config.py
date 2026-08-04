@@ -61,6 +61,30 @@ class Settings(BaseSettings):
         alias="CORS_ORIGINS",
     )
 
+    # --- Email / SMTP (OTP delivery) ---
+    smtp_enabled: bool = Field(default=False, alias="SMTP_ENABLED")
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    smtp_from_email: str = Field(default="", alias="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="PakClean", alias="SMTP_FROM_NAME")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+
+    # --- Email provider selection ---
+    # auto | resend | smtp | console
+    email_provider: str = Field(default="auto", alias="EMAIL_PROVIDER")
+
+    # Resend (recommended — one API key, works from localhost)
+    resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
+    resend_from_email: str = Field(default="", alias="RESEND_FROM_EMAIL")
+    resend_from_name: str = Field(default="PakClean", alias="RESEND_FROM_NAME")
+
+    @field_validator("email_provider")
+    @classmethod
+    def normalize_email_provider(cls, value: str) -> str:
+        return value.strip().lower()
+
     @field_validator("app_env")
     @classmethod
     def normalize_app_env(cls, value: str) -> str:
@@ -80,6 +104,18 @@ class Settings(BaseSettings):
         elif url.startswith("postgresql://"):
             url = "postgresql+psycopg://" + url[len("postgresql://") :]
         return url
+
+    @property
+    def resend_from_display(self) -> str:
+        if self.resend_from_name:
+            return f"{self.resend_from_name} <{self.resend_from_email}>"
+        return self.resend_from_email
+
+    @property
+    def smtp_from_display(self) -> str:
+        if self.smtp_from_name:
+            return f"{self.smtp_from_name} <{self.smtp_from_email}>"
+        return self.smtp_from_email
 
     @property
     def cors_origins(self) -> list[str]:

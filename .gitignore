@@ -41,6 +41,7 @@ Thumbs.db
 # Logs and local dumps
 *.log
 *.sqlite3
+dev.db
 
 # Alembic can generate these locally; keep versions/ in git, ignore editor junk if any
 # (migrations themselves WILL be committed)
