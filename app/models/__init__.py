@@ -8,6 +8,7 @@ from app.models.booking import Booking, BookingStatus
 from app.models.category import Category
 from app.models.otp import OtpChallenge
 from app.models.otp_code import OtpCode
+from app.models.otp_purpose import OtpPurpose
 from app.models.refresh_token import RefreshToken
 from app.models.service import Service
 from app.models.user import User, UserRole
@@ -18,6 +19,7 @@ __all__ = [
     "Category",
     "OtpChallenge",
     "OtpCode",
+    "OtpPurpose",
     "RefreshToken",
     "Service",
     "User",

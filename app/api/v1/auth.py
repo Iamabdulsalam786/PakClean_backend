@@ -1,7 +1,7 @@
 """
-Auth HTTP endpoints — email-verified registration flow.
+Auth HTTP endpoints — email-verified registration + password reset.
 
-Thin controllers: validate via schemas, call AuthVerificationService, map errors → HTTP.
+Thin controllers: validate via schemas, call services, map errors → HTTP.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,18 +10,25 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app.core.auth_exceptions import AuthDomainError
 from app.core.dependencies import CurrentUser, DbSession
 from app.schemas.auth import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     MessageResponse,
     RefreshRequest,
     RefreshResponse,
     RegisterResponse,
     ResendOtpRequest,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
     TokenPair,
     UserLogin,
     UserRead,
     UserRegister,
     VerifyOtpRequest,
+    VerifyResetOtpRequest,
+    VerifyResetOtpResponse,
 )
 from app.services.auth_verification_service import AuthVerificationService
+from app.services.password_reset_service import PasswordResetService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,7 +40,7 @@ def _http_for_domain_error(exc: AuthDomainError) -> HTTPException:
         status_code = status.HTTP_409_CONFLICT
     elif code in {"email_not_verified", "inactive_user"}:
         status_code = status.HTTP_403_FORBIDDEN
-    elif code in {"otp_resend_cooldown", "otp_attempts_exceeded"}:
+    elif code in {"otp_resend_cooldown", "otp_attempts_exceeded", "otp_rate_limit"}:
         status_code = status.HTTP_429_TOO_MANY_REQUESTS
     elif code == "email_delivery_failed":
         status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -52,6 +59,10 @@ def _http_for_domain_error(exc: AuthDomainError) -> HTTPException:
 
 def _service(db: DbSession) -> AuthVerificationService:
     return AuthVerificationService(db)
+
+
+def _password_reset_service(db: DbSession) -> PasswordResetService:
+    return PasswordResetService(db)
 
 
 @router.post(
@@ -150,3 +161,64 @@ def refresh_tokens(payload: RefreshRequest, db: DbSession) -> RefreshResponse:
 def read_me(current_user: CurrentUser) -> UserRead:
     """Requires Authorization: Bearer <access_token>."""
     return UserRead.model_validate(current_user)
+
+
+# ---------------------------------------------------------------------------
+# Forgot / reset password
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+    summary="Request a password-reset OTP (anti-enumeration)",
+)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: DbSession,
+) -> ForgotPasswordResponse:
+    """
+    Always returns the same success message.
+
+    If a verified account exists: emails a PASSWORD_RESET OTP (60s cooldown, 5/hour).
+    """
+    try:
+        return _password_reset_service(db).forgot_password(email=str(payload.email))
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
+
+
+@router.post(
+    "/verify-reset-otp",
+    response_model=VerifyResetOtpResponse,
+    summary="Validate password-reset OTP without consuming it",
+)
+def verify_reset_otp(
+    payload: VerifyResetOtpRequest,
+    db: DbSession,
+) -> VerifyResetOtpResponse:
+    """Approach B: OTP stays usable until /auth/reset-password succeeds."""
+    try:
+        return _password_reset_service(db).verify_reset_otp(payload)
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc
+
+
+@router.post(
+    "/reset-password",
+    response_model=ResetPasswordResponse,
+    summary="Set a new password using a valid reset OTP",
+)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: DbSession,
+) -> ResetPasswordResponse:
+    """
+    Re-checks OTP, updates password hash, marks OTP used, revokes all refresh tokens.
+
+    Client must log in again with the new password.
+    """
+    try:
+        return _password_reset_service(db).reset_password(payload)
+    except AuthDomainError as exc:
+        raise _http_for_domain_error(exc) from exc

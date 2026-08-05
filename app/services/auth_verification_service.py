@@ -38,6 +38,7 @@ from app.core.security import (
     verify_otp_code,
     verify_password,
 )
+from app.models.otp_purpose import OtpPurpose
 from app.models.user import User, UserRole
 from app.repositories.otp_repository import OtpRepository
 from app.repositories.refresh_token_repository import RefreshTokenRepository
@@ -122,6 +123,7 @@ class AuthVerificationService:
         self._otps.add(
             user_id=user.id,
             email=email,
+            purpose=OtpPurpose.EMAIL_VERIFICATION,
             code_hash=hash_otp_code(plain_otp),
             expires_at=expires_at,
             max_attempts=settings.otp_max_attempts,
@@ -148,7 +150,10 @@ class AuthVerificationService:
         """Mark OTP used, set is_verified=True, issue access + refresh tokens."""
         normalized = email.lower().strip()
         user = self._users.get_by_email(normalized)
-        otp = self._otps.get_latest_active_for_email(normalized)
+        otp = self._otps.get_latest_active_for_email(
+            normalized,
+            purpose=OtpPurpose.EMAIL_VERIFICATION,
+        )
 
         # Generic failure path reduces account enumeration.
         if user is None or otp is None:
@@ -200,20 +205,27 @@ class AuthVerificationService:
             # Do not reveal which case matched.
             return generic
 
-        latest = self._otps.get_latest_for_email(normalized)
+        latest = self._otps.get_latest_for_email(
+            normalized,
+            purpose=OtpPurpose.EMAIL_VERIFICATION,
+        )
         if latest is not None:
             elapsed = (_utcnow() - latest.created_at).total_seconds()
             cooldown = settings.otp_resend_cooldown_seconds
             if elapsed < cooldown:
                 raise OtpResendCooldownError(int(cooldown - elapsed) or 1)
 
-        self._otps.invalidate_active_for_user(user.id)
+        self._otps.invalidate_active_for_user(
+            user.id,
+            purpose=OtpPurpose.EMAIL_VERIFICATION,
+        )
 
         plain_otp = generate_otp_code(6)
         expires_at = _utcnow() + timedelta(minutes=settings.otp_expire_minutes)
         self._otps.add(
             user_id=user.id,
             email=normalized,
+            purpose=OtpPurpose.EMAIL_VERIFICATION,
             code_hash=hash_otp_code(plain_otp),
             expires_at=expires_at,
             max_attempts=settings.otp_max_attempts,

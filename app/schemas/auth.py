@@ -1,8 +1,11 @@
 """
-Auth request/response schemas for email-verified registration.
+Auth request/response schemas for email-verified registration + password reset.
 
 Matches mobile signup:
   full_name, email, phone, password, confirm_password, role (customer|provider)
+
+Forgot-password flow DTOs:
+  ForgotPasswordRequest → VerifyResetOtpRequest → ResetPasswordRequest
 
 These DTOs validate INPUT/OUTPUT shapes only — no DB access here.
 """
@@ -111,6 +114,73 @@ class MessageResponse(BaseModel):
     """Generic message wrapper (resend, etc.)."""
 
     message: str
+
+
+# ---------------------------------------------------------------------------
+# Forgot password / reset password
+# ---------------------------------------------------------------------------
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Body for POST /auth/forgot-password."""
+
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """
+    Always the same shape on success — anti-enumeration.
+
+    Do not reveal whether the email exists or is verified.
+    """
+
+    message: str = (
+        "If an account exists for this email, a password reset OTP has been sent."
+    )
+
+
+class VerifyResetOtpRequest(BaseModel):
+    """
+    Body for POST /auth/verify-reset-otp.
+
+    Validates the OTP only — does NOT consume it.
+    Final consume happens in reset-password (Approach B).
+    """
+
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class VerifyResetOtpResponse(BaseModel):
+    """OTP is valid and unused; client may proceed to set a new password."""
+
+    message: str = "OTP verified. You may now reset your password."
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """
+    Body for POST /auth/reset-password.
+
+    Re-checks OTP (Approach B), then sets the new password and revokes sessions.
+    """
+
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def passwords_must_match(self) -> ResetPasswordRequest:
+        if self.new_password != self.confirm_password:
+            raise ValueError("new_password and confirm_password must match")
+        return self
+
+
+class ResetPasswordResponse(BaseModel):
+    """Password changed; all refresh tokens revoked — client must log in again."""
+
+    message: str = "Password reset successful. Please log in with your new password."
 
 
 class UserRead(BaseModel):
