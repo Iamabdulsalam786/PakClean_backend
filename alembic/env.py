@@ -19,9 +19,30 @@ from sqlalchemy import engine_from_config, pool
 from app.core.config import settings
 from app.db.base import Base
 
-# Import models package so each model class registers on Base.metadata.
-# Without this, autogenerate would see an empty schema and drop/create nothing useful.
-from app.models import Booking, Category, OtpChallenge, Service, User  # noqa: F401
+# Import models so each class registers on Base.metadata.
+# Without this, autogenerate would see an empty schema and invent wrong diffs.
+# Legacy layer-based models:
+from app.models import (  # noqa: F401
+    Booking,
+    Category,
+    OtpChallenge,
+    OtpCode,
+    RefreshToken,
+    Service,
+    User,
+)
+# Feature-based models:
+from app.customers.models import CustomerAddress  # noqa: F401
+from app.providers.models import ProviderProfile  # noqa: F401
+from app.reviews.models import Review  # noqa: F401
+from app.service_listings.models import (  # noqa: F401
+    ServiceListing,
+    ServiceListingAvailability,
+    ServiceListingDiscount,
+    ServiceListingImage,
+    ServiceListingTag,
+    Tag,
+)
 
 # Alembic Config object — reads alembic.ini
 config = context.config

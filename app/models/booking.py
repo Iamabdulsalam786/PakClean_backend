@@ -1,15 +1,18 @@
 """
-Booking model — a customer request for a catalog Service at a scheduled time.
+Booking model — customer request for a marketplace ServiceListing (or legacy catalog Service).
 
-Phase 1:
-  - Customer creates a booking (service + time + address)
-  - provider_id stays null until assignment (later)
-  - price_pkr is snapshotted from the service at create time
+Marketplace (current):
+  - Customer books an ACTIVE listing by listing_id
+  - provider_id is set from the listing owner at create time
+  - price_pkr / duration / title are snapshotted (listing may change later)
+  - Status follows BookingStatus state machine (pending → … → completed)
+
+Legacy Phase 1:
+  - service_id pointed at catalog services; still nullable for old rows
 """
 
 from __future__ import annotations
 
-import enum
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -18,20 +21,16 @@ from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.bookings.models.booking_status import BookingStatus
 from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.service import Service
     from app.models.user import User
+    from app.service_listings.models.service_listing import ServiceListing
 
-
-class BookingStatus(str, enum.Enum):
-    """Lifecycle of a booking."""
-
-    PENDING = "pending"  # Created; waiting for provider / confirmation
-    CONFIRMED = "confirmed"  # Accepted (manual/admin for now)
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
+# Re-export so `from app.models.booking import BookingStatus` keeps working.
+__all__ = ["Booking", "BookingStatus"]
 
 
 class Booking(Base):
@@ -52,14 +51,23 @@ class Booking(Base):
         index=True,
     )
 
-    service_id: Mapped[uuid.UUID] = mapped_column(
+    # Marketplace target. Null only on legacy catalog-era rows.
+    listing_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("services.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("service_listings.id", ondelete="RESTRICT"),
+        nullable=True,
         index=True,
     )
 
-    # Null until a provider is assigned (Phase 1 leaves this empty).
+    # Legacy catalog FK — nullable so new listing bookings need not set it.
+    service_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("services.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
+    # Listing owner's user id (set on marketplace create). Null on some legacy rows.
     provider_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -79,14 +87,12 @@ class Booking(Base):
         index=True,
     )
 
-    # When the customer wants the job done (timezone-aware).
     scheduled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         index=True,
     )
 
-    # Simple address text for Phase 1 (structured addresses later).
     address_text: Mapped[str] = mapped_column(
         String(500),
         nullable=False,
@@ -97,7 +103,7 @@ class Booking(Base):
         nullable=True,
     )
 
-    # Snapshot of catalog price at booking time (PKR whole rupees).
+    # Snapshots at book time (immutable commercial terms for this booking).
     price_pkr: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -106,6 +112,34 @@ class Booking(Base):
     duration_minutes: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+    )
+
+    listing_title_snapshot: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+    )
+
+    rejection_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Lifecycle audit (null until that transition occurs).
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -133,10 +167,19 @@ class Booking(Base):
         lazy="joined",
     )
 
-    service: Mapped[Service] = relationship(
+    service: Mapped[Service | None] = relationship(
         "Service",
         lazy="joined",
     )
 
+    listing: Mapped[ServiceListing | None] = relationship(
+        "ServiceListing",
+        foreign_keys=[listing_id],
+        lazy="selectin",
+    )
+
     def __repr__(self) -> str:
-        return f"<Booking id={self.id} status={self.status.value}>"
+        return (
+            f"<Booking id={self.id} status={self.status.value} "
+            f"listing_id={self.listing_id}>"
+        )
