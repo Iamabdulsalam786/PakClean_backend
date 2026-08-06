@@ -41,6 +41,17 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @application.get("/", tags=["system"])
+    def root() -> dict[str, str]:
+        """Helpful entrypoint — avoids bare 404 when opening the server root in a browser."""
+        return {
+            "status": "ok",
+            "app": settings.app_name,
+            "health": "/health",
+            "docs": "/docs",
+            "api": settings.api_v1_prefix,
+        }
+
     @application.get("/health", tags=["system"])
     def health_check() -> dict[str, str]:
         """
