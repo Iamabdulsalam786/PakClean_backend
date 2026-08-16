@@ -19,6 +19,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.user import User
 from app.reviews.models.review import Review
 
 
@@ -76,6 +77,24 @@ class ReviewRepository:
             .offset(offset)
         )
         return list(self._db.scalars(statement).all())
+
+    def list_for_listing_with_customer_names(
+        self,
+        listing_id: UUID,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[tuple[Review, str]]:
+        """Public listing feed with customer full_name in one query (no N+1)."""
+        statement = (
+            select(Review, User.full_name)
+            .join(User, User.id == Review.customer_id)
+            .where(Review.listing_id == listing_id)
+            .order_by(Review.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(self._db.execute(statement).all())
 
     def count_for_listing(self, listing_id: UUID) -> int:
         statement = (

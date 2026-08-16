@@ -34,10 +34,16 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     debug: bool = Field(default=True, alias="DEBUG")
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
+    skip_provider_verification: bool = Field(
+        default=True,
+        alias="SKIP_PROVIDER_VERIFICATION",
+        description="When true, providers can create/publish listings without admin VERIFIED status. Set false in production.",
+    )
 
     # --- Server ---
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
+    upload_dir: str = Field(default="uploads", alias="UPLOAD_DIR")
 
     # --- Database ---
     database_url: str = Field(..., alias="DATABASE_URL")
@@ -71,6 +77,13 @@ class Settings(BaseSettings):
         alias="OTP_RESEND_COOLDOWN_SECONDS",
     )
     otp_max_attempts: int = Field(default=5, alias="OTP_MAX_ATTEMPTS")
+
+    # --- Firebase Cloud Messaging (optional — push disabled if unset) ---
+    firebase_credentials_path: str | None = Field(
+        default=None,
+        alias="FIREBASE_CREDENTIALS_PATH",
+        description="Path to Firebase Admin SDK service account JSON (relative to Pakclean_backend/ or absolute).",
+    )
 
     # --- CORS ---
     # Stored as a raw comma-separated string in .env; exposed as a list via property.

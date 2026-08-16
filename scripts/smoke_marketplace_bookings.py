@@ -6,7 +6,7 @@ Covers:
   - book via saved address_id (snapshot address_text)
   - foreign/unknown address_id -> 404; both address fields -> 422
   - provider pending inbox
-  - accept -> start -> complete
+  - accept -> start -> complete -> customer confirm
   - reject path (separate booking)
   - customer cancel (pending)
   - complete without start -> 409
@@ -305,11 +305,23 @@ def main() -> int:
             f"/api/v1/bookings/{booking_id}/complete",
             token=prov_tok,
         )
+        assert code == 200 and isinstance(body, dict) and body["status"] == "awaiting_confirmation", (
+            code,
+            body,
+        )
+        print("OK complete -> awaiting_confirmation")
+
+        code, body = http_json(
+            base,
+            "POST",
+            f"/api/v1/bookings/{booking_id}/confirm",
+            token=cust_tok,
+        )
         assert code == 200 and isinstance(body, dict) and body["status"] == "completed", (
             code,
             body,
         )
-        print("OK complete -> completed")
+        print("OK confirm -> completed")
 
         db.expire_all()
         refreshed = db.get(ServiceListing, active.id)

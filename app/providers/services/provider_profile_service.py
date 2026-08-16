@@ -24,6 +24,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.user import User, UserRole
 from app.providers.models.provider_profile import (
     ProviderProfile,
@@ -202,6 +203,10 @@ class ProviderProfileService:
         profile = self._profiles.get_by_user_id(actor.id)
         if profile is None:
             raise ProviderProfileNotFoundError()
+        if settings.skip_provider_verification:
+            if not profile.is_active:
+                raise ProviderNotVerifiedError()
+            return profile
         if not profile.can_create_listings():
             raise ProviderNotVerifiedError()
         return profile

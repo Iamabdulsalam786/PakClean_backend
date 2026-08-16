@@ -35,6 +35,7 @@ from app.models import (  # noqa: F401
 from app.customers.models import CustomerAddress  # noqa: F401
 from app.providers.models import ProviderProfile  # noqa: F401
 from app.reviews.models import Review  # noqa: F401
+from app.notifications.models import DeviceToken, Notification  # noqa: F401
 from app.service_listings.models import (  # noqa: F401
     ServiceListing,
     ServiceListingAvailability,

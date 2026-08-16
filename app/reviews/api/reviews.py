@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.core.dependencies import CurrentCustomer, DbSession
 from app.reviews.schemas.review import (
+    PublicReviewListResponse,
     ReviewCreate,
     ReviewListResponse,
     ReviewRead,
@@ -88,7 +89,7 @@ def list_my_reviews(
 
 @marketplace_router.get(
     "/listings/{listing_id}/reviews",
-    response_model=ReviewListResponse,
+    response_model=PublicReviewListResponse,
     summary="List public reviews for a listing",
 )
 def list_listing_reviews(
@@ -96,7 +97,7 @@ def list_listing_reviews(
     db: DbSession,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
-) -> ReviewListResponse:
+) -> PublicReviewListResponse:
     return _service(db).list_listing_reviews(
         listing_id,
         page=page,

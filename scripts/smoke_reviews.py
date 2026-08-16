@@ -227,7 +227,7 @@ def main() -> int:
         assert code == 409, (code, body)
         print("OK review before complete -> 409")
 
-        # Complete lifecycle
+        # Complete lifecycle (provider accept → start → mark done, customer confirm)
         for action in ("accept", "start", "complete"):
             code, body = http_json(
                 base,
@@ -236,6 +236,15 @@ def main() -> int:
                 token=prov_tok,
             )
             assert code == 200, (action, code, body)
+        assert body["status"] == "awaiting_confirmation", body
+
+        code, body = http_json(
+            base,
+            "POST",
+            f"/api/v1/bookings/{booking_id}/confirm",
+            token=cust_tok,
+        )
+        assert code == 200 and body["status"] == "completed", (code, body)
         print("OK booking completed")
 
         # Create review
@@ -287,6 +296,9 @@ def main() -> int:
         assert code == 200 and isinstance(body, dict), (code, body)
         assert body["total"] >= 1
         assert any(i["id"] == review_id for i in body["items"])
+        public_item = next(i for i in body["items"] if i["id"] == review_id)
+        assert "customer_display_name" in public_item
+        assert "customer_id" not in public_item
         print("OK public listing reviews feed")
 
         # Mine

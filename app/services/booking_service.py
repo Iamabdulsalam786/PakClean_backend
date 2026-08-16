@@ -9,8 +9,11 @@ Marketplace create:
 
 Provider lifecycle:
   pending → confirmed (accept) | rejected (reject) | cancelled (customer)
-  confirmed → in_progress (start) | cancelled
-  in_progress → completed
+  confirmed → in_progress (start) | cancelled (customer)
+  in_progress → awaiting_confirmation (provider marks work done)
+  awaiting_confirmation → completed (customer confirms)
+
+Reviews: optional after completed (separate /reviews API).
 
 Transitions use BookingStatus.can_transition_to + row locks on mutations.
 """
@@ -31,6 +34,8 @@ from app.customers.repositories.customer_address_repository import (
 from app.models.booking import Booking
 from app.models.user import User, UserRole
 from app.schemas.booking import BookingCreate, BookingRejectRequest
+from app.notifications.services.notification_service import dispatch_booking_notification
+from app.reviews.repositories.review_repository import ReviewRepository
 from app.service_listings.models.service_listing import ServiceListing
 
 logger = logging.getLogger(__name__)
@@ -62,6 +67,42 @@ def _transition(booking: Booking, new_status: BookingStatus) -> None:
             code="invalid_status",
         )
     booking.status = new_status
+
+
+def _booking_has_review(db: Session, booking_id: UUID) -> bool:
+    return ReviewRepository(db).get_by_booking_id(booking_id) is not None
+
+
+def enrich_booking_read(db: Session, booking: Booking) -> dict:
+    """Build BookingRead payload with computed has_review."""
+    payload = {
+        field: getattr(booking, field)
+        for field in (
+            "id",
+            "customer_id",
+            "listing_id",
+            "service_id",
+            "provider_id",
+            "status",
+            "scheduled_at",
+            "address_text",
+            "notes",
+            "price_pkr",
+            "duration_minutes",
+            "listing_title_snapshot",
+            "rejection_reason",
+            "accepted_at",
+            "started_at",
+            "provider_completed_at",
+            "customer_confirmed_at",
+            "completed_at",
+            "cancelled_at",
+            "created_at",
+            "updated_at",
+        )
+    }
+    payload["has_review"] = _booking_has_review(db, booking.id)
+    return payload
 
 
 def _resolve_address_text(db: Session, customer: User, data: BookingCreate) -> str:
@@ -145,6 +186,7 @@ def create_booking(db: Session, customer: User, data: BookingCreate) -> Booking:
         listing.id,
         customer.id,
     )
+    dispatch_booking_notification(db, booking, "booking_created")
     return booking
 
 
@@ -165,14 +207,20 @@ def get_customer_booking(db: Session, customer: User, booking_id: UUID) -> Booki
 
 
 def cancel_customer_booking(db: Session, customer: User, booking_id: UUID) -> Booking:
-    """Customer may cancel while pending or confirmed (not in_progress+)."""
+    """Customer may cancel while pending or confirmed (not once work has started)."""
     booking = get_customer_booking(db, customer, booking_id)
+    if booking.status not in {BookingStatus.PENDING, BookingStatus.CONFIRMED}:
+        raise BookingError(
+            f"Cannot cancel a {booking.status.value} booking",
+            code="invalid_status",
+        )
     _transition(booking, BookingStatus.CANCELLED)
     booking.cancelled_at = _utcnow()
     db.add(booking)
     db.commit()
     db.refresh(booking)
     logger.info("booking_cancelled booking_id=%s by=customer", booking.id)
+    dispatch_booking_notification(db, booking, "booking_cancelled")
     return booking
 
 
@@ -243,6 +291,7 @@ def accept_provider_booking(db: Session, provider: User, booking_id: UUID) -> Bo
     db.commit()
     booking = get_provider_booking(db, provider, booking_id)
     logger.info("booking_accepted booking_id=%s", booking.id)
+    dispatch_booking_notification(db, booking, "booking_accepted")
     return booking
 
 
@@ -279,6 +328,7 @@ def reject_provider_booking(
     db.commit()
     booking = get_provider_booking(db, provider, booking_id)
     logger.info("booking_rejected booking_id=%s", booking.id)
+    dispatch_booking_notification(db, booking, "booking_rejected")
     return booking
 
 
@@ -310,11 +360,12 @@ def start_provider_booking(db: Session, provider: User, booking_id: UUID) -> Boo
     db.commit()
     booking = get_provider_booking(db, provider, booking_id)
     logger.info("booking_started booking_id=%s", booking.id)
+    dispatch_booking_notification(db, booking, "booking_started")
     return booking
 
 
 def complete_provider_booking(db: Session, provider: User, booking_id: UUID) -> Booking:
-    """in_progress → completed; bumps listing.booking_count when listing_id set."""
+    """in_progress → awaiting_confirmation (provider marks work done)."""
     now = _utcnow()
     result = db.execute(
         update(Booking)
@@ -324,8 +375,8 @@ def complete_provider_booking(db: Session, provider: User, booking_id: UUID) -> 
             Booking.status == BookingStatus.IN_PROGRESS,
         )
         .values(
-            status=BookingStatus.COMPLETED,
-            completed_at=now,
+            status=BookingStatus.AWAITING_CONFIRMATION,
+            provider_completed_at=now,
             updated_at=now,
         )
     )
@@ -333,8 +384,45 @@ def complete_provider_booking(db: Session, provider: User, booking_id: UUID) -> 
         booking = db.get(Booking, booking_id)
         if booking is None or booking.provider_id != provider.id:
             raise BookingError("Booking not found", code="not_found")
+        if booking.status == BookingStatus.AWAITING_CONFIRMATION:
+            return booking
         raise BookingError(
-            f"Cannot complete a {booking.status.value} booking",
+            f"Cannot mark work done on a {booking.status.value} booking",
+            code="invalid_status",
+        )
+
+    db.commit()
+    booking = get_provider_booking(db, provider, booking_id)
+    logger.info("booking_provider_completed booking_id=%s", booking.id)
+    dispatch_booking_notification(db, booking, "booking_provider_completed")
+    return booking
+
+
+def confirm_customer_booking(db: Session, customer: User, booking_id: UUID) -> Booking:
+    """awaiting_confirmation → completed (customer confirms service)."""
+    now = _utcnow()
+    result = db.execute(
+        update(Booking)
+        .where(
+            Booking.id == booking_id,
+            Booking.customer_id == customer.id,
+            Booking.status == BookingStatus.AWAITING_CONFIRMATION,
+        )
+        .values(
+            status=BookingStatus.COMPLETED,
+            customer_confirmed_at=now,
+            completed_at=now,
+            updated_at=now,
+        )
+    )
+    if (result.rowcount or 0) != 1:
+        booking = db.get(Booking, booking_id)
+        if booking is None or booking.customer_id != customer.id:
+            raise BookingError("Booking not found", code="not_found")
+        if booking.status == BookingStatus.COMPLETED:
+            return booking
+        raise BookingError(
+            f"Cannot confirm a {booking.status.value} booking",
             code="invalid_status",
         )
 
@@ -348,7 +436,8 @@ def complete_provider_booking(db: Session, provider: User, booking_id: UUID) -> 
 
     db.commit()
     db.refresh(booking)
-    logger.info("booking_completed booking_id=%s", booking.id)
+    logger.info("booking_customer_confirmed booking_id=%s", booking.id)
+    dispatch_booking_notification(db, booking, "booking_customer_confirmed")
     return booking
 
 
@@ -380,6 +469,8 @@ def confirm_provider_booking(db: Session, provider: User, booking_id: UUID) -> B
     db.add(booking)
     db.commit()
     db.refresh(booking)
+    logger.info("booking_accepted booking_id=%s (legacy confirm)", booking.id)
+    dispatch_booking_notification(db, booking, "booking_accepted")
     return booking
 
 

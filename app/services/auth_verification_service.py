@@ -44,8 +44,10 @@ from app.repositories.otp_repository import OtpRepository
 from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import (
+    MessageResponse,
     RefreshResponse,
     RegisterResponse,
+    SIGNUP_ROLES,
     TokenPair,
     UserLogin,
     UserRegister,
@@ -104,7 +106,7 @@ class AuthVerificationService:
         if self._users.get_by_phone(phone) is not None:
             raise PhoneTakenError()
 
-        if data.role not in {UserRole.CUSTOMER, UserRole.PROVIDER}:
+        if data.role not in SIGNUP_ROLES:
             raise AuthDomainError("Invalid role", code="invalid_role")
 
         user = self._users.add(
@@ -131,16 +133,38 @@ class AuthVerificationService:
         self._db.commit()
         self._db.refresh(user)
 
+        email_delivered = False
+        dev_code: str | None = None
+
         try:
             self._send_otp_email(to_email=email, code=plain_otp, full_name=user.full_name)
+            email_delivered = True
         except EmailSendError as exc:
-            logger.exception("OTP email failed after register email_domain=%s", email.split("@")[-1])
-            raise EmailDeliveryError(
-                "Account created but failed to send verification email. Please use resend-otp."
-            ) from exc
+            logger.exception(
+                "OTP email failed after register email_domain=%s",
+                email.split("@")[-1],
+            )
+            if settings.debug:
+                dev_code = plain_otp
+                logger.warning(
+                    "DEV ONLY: verification OTP for %s is %s (SMTP not configured or send failed)",
+                    email,
+                    plain_otp,
+                )
+            else:
+                raise EmailDeliveryError(
+                    "Account created but failed to send verification email. Please use resend-otp."
+                ) from exc
 
-        # Never log or return plain_otp.
-        return RegisterResponse(email=email, user_id=user.id)
+        if settings.debug and email_delivered:
+            dev_code = plain_otp
+
+        return RegisterResponse(
+            email=email,
+            user_id=user.id,
+            email_delivered=email_delivered,
+            dev_code=dev_code,
+        )
 
     # ------------------------------------------------------------------
     # Verify OTP
@@ -190,7 +214,7 @@ class AuthVerificationService:
     # Resend OTP
     # ------------------------------------------------------------------
 
-    def resend_otp(self, *, email: str) -> str:
+    def resend_otp(self, *, email: str) -> MessageResponse:
         """
         Invalidate old OTPs, create a new one, send email.
 
@@ -203,7 +227,7 @@ class AuthVerificationService:
         user = self._users.get_by_email(normalized)
         if user is None or user.is_verified or not user.is_active:
             # Do not reveal which case matched.
-            return generic
+            return MessageResponse(message=generic)
 
         latest = self._otps.get_latest_for_email(
             normalized,
@@ -232,17 +256,36 @@ class AuthVerificationService:
         )
         self._db.commit()
 
+        email_delivered = False
+        dev_code: str | None = None
+
         try:
             self._send_otp_email(
                 to_email=normalized,
                 code=plain_otp,
                 full_name=user.full_name,
             )
+            email_delivered = True
         except EmailSendError as exc:
             logger.exception("OTP resend email failed domain=%s", normalized.split("@")[-1])
-            raise EmailDeliveryError() from exc
+            if settings.debug:
+                dev_code = plain_otp
+                logger.warning(
+                    "DEV ONLY: verification OTP for %s is %s (SMTP not configured or send failed)",
+                    normalized,
+                    plain_otp,
+                )
+            else:
+                raise EmailDeliveryError() from exc
 
-        return generic
+        if settings.debug and email_delivered:
+            dev_code = plain_otp
+
+        return MessageResponse(
+            message=generic,
+            email_delivered=email_delivered,
+            dev_code=dev_code,
+        )
 
     # ------------------------------------------------------------------
     # Login

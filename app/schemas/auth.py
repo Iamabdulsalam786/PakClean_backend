@@ -19,13 +19,14 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 from app.models.user import UserRole
 
-# Roles allowed on public signup (never admin via client).
-PUBLIC_ROLES = {UserRole.CUSTOMER, UserRole.PROVIDER}
+# Roles allowed on mobile signup (admin included for in-app admin onboarding; lock down in production via env later).
+SIGNUP_ROLES = {UserRole.CUSTOMER, UserRole.PROVIDER, UserRole.ADMIN}
+PUBLIC_ROLES = SIGNUP_ROLES
 
 
 def _reject_non_public_role(role: UserRole) -> UserRole:
-    if role not in PUBLIC_ROLES:
-        raise ValueError("role must be 'customer' or 'provider'")
+    if role not in SIGNUP_ROLES:
+        raise ValueError("role must be 'customer', 'provider', or 'admin'")
     return role
 
 
@@ -65,6 +66,8 @@ class RegisterResponse(BaseModel):
     message: str = "Registration successful. Please verify the OTP sent to your email."
     email: EmailStr
     user_id: UUID
+    email_delivered: bool = False
+    dev_code: str | None = None
 
 
 class UserLogin(BaseModel):
@@ -114,6 +117,8 @@ class MessageResponse(BaseModel):
     """Generic message wrapper (resend, etc.)."""
 
     message: str
+    email_delivered: bool = False
+    dev_code: str | None = None
 
 
 # ---------------------------------------------------------------------------

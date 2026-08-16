@@ -57,3 +57,22 @@ class ReviewListResponse(BaseModel):
     total: int
     page: int = 1
     page_size: int = 20
+
+
+class PublicReviewRead(BaseModel):
+    """Public listing review — hides raw customer UUID; shows display name only."""
+
+    id: UUID
+    rating: int
+    comment: str | None
+    customer_display_name: str
+    created_at: datetime
+
+
+class PublicReviewListResponse(BaseModel):
+    """Paginated public reviews for a listing detail page."""
+
+    items: list[PublicReviewRead]
+    total: int
+    page: int = 1
+    page_size: int = 20

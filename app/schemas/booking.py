@@ -110,8 +110,11 @@ class BookingRead(BaseModel):
     rejection_reason: str | None = None
     accepted_at: datetime | None = None
     started_at: datetime | None = None
+    provider_completed_at: datetime | None = None
+    customer_confirmed_at: datetime | None = None
     completed_at: datetime | None = None
     cancelled_at: datetime | None = None
+    has_review: bool = False
     created_at: datetime
     updated_at: datetime
 

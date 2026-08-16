@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.models.category import Category
 from app.models.user import User
+from app.notifications.services.notification_service import dispatch_listing_published_notification
 from app.providers.repositories.provider_profile_repository import (
     ProviderProfileRepository,
 )
@@ -37,6 +38,7 @@ from app.providers.services.provider_profile_service import (
     ProviderProfileNotFoundError,
     ProviderProfileService,
 )
+from app.reviews.repositories.review_repository import ReviewRepository
 from app.service_listings.models.listing_status import ListingStatus
 from app.service_listings.models.service_listing import ServiceListing
 from app.service_listings.repositories.service_listing_repository import (
@@ -221,6 +223,7 @@ class ServiceListingService:
         self._db.refresh(listing)
 
         logger.info("listing_published listing_id=%s", listing.id)
+        dispatch_listing_published_notification(self._db, actor, listing)
         return ServiceListingRead.model_validate(listing)
 
     def deactivate_listing(self, actor: User, listing_id: UUID) -> ServiceListingRead:
@@ -258,7 +261,9 @@ class ServiceListingService:
         listing = self._listings.get_by_id(listing_id)
         if listing is None or not listing.is_publicly_visible():
             raise ListingNotFoundError()
-        return ServiceListingPublicRead.model_validate(listing)
+        review_count = ReviewRepository(self._db).count_for_listing(listing_id)
+        payload = ServiceListingPublicRead.model_validate(listing)
+        return payload.model_copy(update={"review_count": review_count})
 
     def search_public(
         self,

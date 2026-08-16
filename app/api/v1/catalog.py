@@ -1,20 +1,15 @@
 """
-Catalog HTTP endpoints — public browse of categories and services.
+Catalog HTTP endpoints — public category taxonomy only.
 
-No auth required (customers discover offerings before login).
+Marketplace listings replace legacy catalog services. Providers pick a category
+when creating a listing; customers browse /marketplace/listings, not /catalog/services.
 """
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, status
 
 from app.core.dependencies import DbSession
-from app.schemas.catalog import CategoryRead, CategoryWithServices, ServiceRead
-from app.services.catalog_service import (
-    CatalogError,
-    get_category_by_slug,
-    get_service_by_slug,
-    list_categories,
-    list_services,
-)
+from app.schemas.catalog import CategoryRead
+from app.services.catalog_service import CatalogError, get_category_by_slug, list_categories
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -38,44 +33,13 @@ def get_categories(db: DbSession) -> list[CategoryRead]:
 
 @router.get(
     "/categories/{slug}",
-    response_model=CategoryWithServices,
-    summary="Get a category by slug (with its services)",
+    response_model=CategoryRead,
+    summary="Get a category by slug",
 )
-def get_category(slug: str, db: DbSession) -> CategoryWithServices:
+def get_category(slug: str, db: DbSession) -> CategoryRead:
     """Example: GET /catalog/categories/plumbing"""
     try:
-        category = get_category_by_slug(db, slug, with_services=True, active_only=True)
+        category = get_category_by_slug(db, slug, active_only=True)
     except CatalogError as exc:
         raise _http_for_catalog_error(exc) from exc
-    return CategoryWithServices.model_validate(category)
-
-
-@router.get(
-    "/services",
-    response_model=list[ServiceRead],
-    summary="List active services",
-)
-def get_services(
-    db: DbSession,
-    category: str | None = Query(
-        default=None,
-        description="Optional category slug filter, e.g. plumbing",
-    ),
-) -> list[ServiceRead]:
-    """All services, or filter: GET /catalog/services?category=plumbing"""
-    rows = list_services(db, category_slug=category, active_only=True)
-    return [ServiceRead.model_validate(row) for row in rows]
-
-
-@router.get(
-    "/services/{slug}",
-    response_model=ServiceRead,
-    summary="Get a service by slug",
-)
-def get_service(slug: str, db: DbSession) -> ServiceRead:
-    """Example: GET /catalog/services/tap-repair"""
-    try:
-        service = get_service_by_slug(db, slug, active_only=True)
-    except CatalogError as exc:
-        raise _http_for_catalog_error(exc) from exc
-    return ServiceRead.model_validate(service)
+    return CategoryRead.model_validate(category)

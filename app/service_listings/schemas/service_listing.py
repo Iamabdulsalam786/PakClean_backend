@@ -152,6 +152,7 @@ class ServiceListingPublicRead(BaseModel):
     is_featured: bool
     booking_count: int
     average_rating: Decimal
+    review_count: int = 0
     created_at: datetime
 
 

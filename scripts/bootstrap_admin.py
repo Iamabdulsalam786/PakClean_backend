@@ -40,6 +40,7 @@ def bootstrap_admin(
                 phone=phone,
                 role=UserRole.ADMIN,
                 is_active=True,
+                is_verified=True,
             )
             db.add(user)
             db.commit()
@@ -49,6 +50,7 @@ def bootstrap_admin(
 
         existing.role = UserRole.ADMIN
         existing.is_active = True
+        existing.is_verified = True
         existing.full_name = full_name.strip()
         existing.phone = phone
         existing.hashed_password = hash_password(password)

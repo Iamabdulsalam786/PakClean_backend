@@ -8,8 +8,10 @@ main.py will mount this once:
 from fastapi import APIRouter
 
 from app.api.v1 import auth, bookings, catalog
+from app.api.v1.uploads import router as uploads_router
 from app.customers.api.profile import router as customers_router
 from app.discovery.api.router import router as discovery_router
+from app.notifications.api.notifications import devices_router, router as notifications_router
 from app.providers.api.profiles import admin_router as provider_admin_router
 from app.providers.api.profiles import provider_router
 from app.reviews.api.reviews import marketplace_router as marketplace_reviews_router
@@ -30,8 +32,11 @@ from app.service_listings.api.listings import (
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(auth.router)
+api_v1_router.include_router(uploads_router)
 api_v1_router.include_router(catalog.router)
 api_v1_router.include_router(bookings.router)
+api_v1_router.include_router(notifications_router)
+api_v1_router.include_router(devices_router)
 api_v1_router.include_router(customers_router)
 api_v1_router.include_router(reviews_router)
 api_v1_router.include_router(provider_router)

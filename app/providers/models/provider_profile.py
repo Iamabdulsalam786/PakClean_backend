@@ -205,12 +205,7 @@ class ProviderProfile(Base):
     # listings = relationship("ServiceListing", back_populates="provider")
 
     def can_create_listings(self) -> bool:
-        """
-        Single gate used by listing services.
-
-        Beginner mistake: checking only verification_status and forgetting
-        is_active (suspended providers must not publish).
-        """
+        """Requires active profile and admin VERIFIED status."""
         return (
             self.is_active
             and self.verification_status is ProviderVerificationStatus.VERIFIED

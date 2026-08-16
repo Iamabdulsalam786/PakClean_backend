@@ -5,7 +5,7 @@ Customer:
   POST   /bookings                 create (listing_id)
   GET    /bookings                 list mine
   GET    /bookings/{id}            get mine
-  POST   /bookings/{id}/cancel     cancel (pending/confirmed)
+  POST   /bookings/{id}/confirm     confirm service complete (awaiting_confirmation)
 
 Provider:
   GET    /bookings/provider/mine
@@ -14,7 +14,7 @@ Provider:
   POST   /bookings/{id}/accept
   POST   /bookings/{id}/reject
   POST   /bookings/{id}/start
-  POST   /bookings/{id}/complete
+  POST   /bookings/{id}/complete   mark work done (in_progress → awaiting_confirmation)
 
 Admin (legacy helpers retained):
   GET    /bookings/admin/all
@@ -39,7 +39,9 @@ from app.services.booking_service import (
     assign_provider_to_booking,
     cancel_customer_booking,
     complete_provider_booking,
+    confirm_customer_booking,
     create_booking,
+    enrich_booking_read,
     get_customer_booking,
     get_provider_booking,
     list_all_bookings,
@@ -49,8 +51,13 @@ from app.services.booking_service import (
     reject_provider_booking,
     start_provider_booking,
 )
+from app.schemas.booking import BookingRead
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
+
+
+def _to_booking_read(db: DbSession, booking) -> BookingRead:
+    return BookingRead.model_validate(enrich_booking_read(db, booking))
 
 
 def _http_for_booking_error(exc: BookingError) -> HTTPException:
@@ -99,7 +106,7 @@ def post_booking(
         booking = create_booking(db, customer, payload)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
 
 
 @router.get(
@@ -109,7 +116,7 @@ def post_booking(
 )
 def get_my_bookings(db: DbSession, customer: CurrentCustomer) -> list[BookingRead]:
     rows = list_customer_bookings(db, customer)
-    return [BookingRead.model_validate(row) for row in rows]
+    return [_to_booking_read(db, row) for row in rows]
 
 
 @router.get(
@@ -123,7 +130,7 @@ def get_all_bookings(
 ) -> list[BookingRead]:
     _ = admin
     rows = list_all_bookings(db)
-    return [BookingRead.model_validate(row) for row in rows]
+    return [_to_booking_read(db, row) for row in rows]
 
 
 @router.post(
@@ -146,7 +153,7 @@ def assign_booking_provider(
         )
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +171,7 @@ def get_my_provider_bookings(
     provider: CurrentProvider,
 ) -> list[BookingRead]:
     rows = list_provider_bookings(db, provider)
-    return [BookingRead.model_validate(row) for row in rows]
+    return [_to_booking_read(db, row) for row in rows]
 
 
 @router.get(
@@ -177,7 +184,7 @@ def get_my_pending_bookings(
     provider: CurrentProvider,
 ) -> list[BookingRead]:
     rows = list_provider_pending_bookings(db, provider)
-    return [BookingRead.model_validate(row) for row in rows]
+    return [_to_booking_read(db, row) for row in rows]
 
 
 @router.get(
@@ -194,7 +201,7 @@ def get_provider_side_booking(
         booking = get_provider_booking(db, provider, booking_id)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
 
 
 @router.post(
@@ -211,7 +218,7 @@ def accept_booking(
         booking = accept_provider_booking(db, provider, booking_id)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
 
 
 @router.post(
@@ -229,7 +236,7 @@ def reject_booking(
         booking = reject_provider_booking(db, provider, booking_id, payload)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
 
 
 @router.post(
@@ -246,13 +253,13 @@ def start_booking(
         booking = start_provider_booking(db, provider, booking_id)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
 
 
 @router.post(
     "/{booking_id}/complete",
     response_model=BookingRead,
-    summary="Complete in-progress booking (provider)",
+    summary="Mark work done — awaits customer confirmation (provider)",
 )
 def complete_booking(
     booking_id: UUID,
@@ -263,7 +270,24 @@ def complete_booking(
         booking = complete_provider_booking(db, provider, booking_id)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
+
+
+@router.post(
+    "/{booking_id}/confirm",
+    response_model=BookingRead,
+    summary="Confirm service completion (customer)",
+)
+def confirm_booking(
+    booking_id: UUID,
+    db: DbSession,
+    customer: CurrentCustomer,
+) -> BookingRead:
+    try:
+        booking = confirm_customer_booking(db, customer, booking_id)
+    except BookingError as exc:
+        raise _http_for_booking_error(exc) from exc
+    return _to_booking_read(db, booking)
 
 
 @router.get(
@@ -280,7 +304,7 @@ def get_booking(
         booking = get_customer_booking(db, customer, booking_id)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)
 
 
 @router.post(
@@ -297,4 +321,4 @@ def cancel_booking(
         booking = cancel_customer_booking(db, customer, booking_id)
     except BookingError as exc:
         raise _http_for_booking_error(exc) from exc
-    return BookingRead.model_validate(booking)
+    return _to_booking_read(db, booking)

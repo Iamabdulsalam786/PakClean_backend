@@ -104,10 +104,9 @@ def verify_otp(payload: VerifyOtpRequest, db: DbSession) -> TokenPair:
 def resend_otp(payload: ResendOtpRequest, db: DbSession) -> MessageResponse:
     """Invalidates previous OTPs and emails a new code."""
     try:
-        message = _service(db).resend_otp(email=str(payload.email))
+        return _service(db).resend_otp(email=str(payload.email))
     except AuthDomainError as exc:
         raise _http_for_domain_error(exc) from exc
-    return MessageResponse(message=message)
 
 
 @router.post(

@@ -32,6 +32,8 @@ from app.providers.repositories.provider_profile_repository import (
 from app.reviews.models.review import Review
 from app.reviews.repositories.review_repository import ReviewRepository
 from app.reviews.schemas.review import (
+    PublicReviewListResponse,
+    PublicReviewRead,
     ReviewCreate,
     ReviewListResponse,
     ReviewRead,
@@ -39,6 +41,17 @@ from app.reviews.schemas.review import (
 from app.service_listings.models.service_listing import ServiceListing
 
 logger = logging.getLogger(__name__)
+
+
+def _customer_display_name(full_name: str) -> str:
+    """Privacy-friendly label — first name + last initial, never full email/UUID."""
+    cleaned = full_name.strip()
+    if not cleaned:
+        return "Verified customer"
+    parts = cleaned.split()
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} {parts[-1][0]}."
 
 
 class ReviewDomainError(Exception):
@@ -165,19 +178,28 @@ class ReviewService:
         *,
         page: int = 1,
         page_size: int = 20,
-    ) -> ReviewListResponse:
+    ) -> PublicReviewListResponse:
         """Public feed — no auth required at service level (route decides)."""
         page = max(1, page)
         page_size = min(max(1, page_size), 50)
         offset = (page - 1) * page_size
         total = self._reviews.count_for_listing(listing_id)
-        rows = self._reviews.list_for_listing(
+        rows = self._reviews.list_for_listing_with_customer_names(
             listing_id,
             limit=page_size,
             offset=offset,
         )
-        return ReviewListResponse(
-            items=[ReviewRead.model_validate(r) for r in rows],
+        return PublicReviewListResponse(
+            items=[
+                PublicReviewRead(
+                    id=review.id,
+                    rating=review.rating,
+                    comment=review.comment,
+                    customer_display_name=_customer_display_name(full_name),
+                    created_at=review.created_at,
+                )
+                for review, full_name in rows
+            ],
             total=total,
             page=page,
             page_size=page_size,
