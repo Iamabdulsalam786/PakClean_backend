@@ -8,6 +8,11 @@ env/
 .env.local
 .env.*.local
 
+# Firebase Admin SDK (never commit service account JSON)
+secrets/*.json
+firebase-service-account.json
+*firebase-adminsdk*.json
+
 # Python bytecode / cache
 __pycache__/
 *.py[cod]
@@ -42,6 +47,9 @@ Thumbs.db
 *.log
 *.sqlite3
 dev.db
+
+# User-uploaded listing images (served via /uploads)
+uploads/
 
 # Alembic can generate these locally; keep versions/ in git, ignore editor junk if any
 # (migrations themselves WILL be committed)

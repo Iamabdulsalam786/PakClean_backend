@@ -97,3 +97,8 @@ def require_roles(*roles: UserRole) -> Callable[..., User]:
         return current_user
 
     return _checker
+
+
+# Convenience aliases for customer-only / provider-only routes later.
+CurrentCustomer = Annotated[User, Depends(require_roles(UserRole.CUSTOMER))]
+CurrentProvider = Annotated[User, Depends(require_roles(UserRole.PROVIDER))]

@@ -34,10 +34,16 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     debug: bool = Field(default=True, alias="DEBUG")
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
+    skip_provider_verification: bool = Field(
+        default=True,
+        alias="SKIP_PROVIDER_VERIFICATION",
+        description="When true, providers can create/publish listings without admin VERIFIED status. Set false in production.",
+    )
 
     # --- Server ---
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
+    upload_dir: str = Field(default="uploads", alias="UPLOAD_DIR")
 
     # --- Database ---
     database_url: str = Field(..., alias="DATABASE_URL")
@@ -53,6 +59,31 @@ class Settings(BaseSettings):
         alias="REFRESH_TOKEN_EXPIRE_DAYS",
     )
     algorithm: str = Field(default="HS256", alias="ALGORITHM")
+
+    # --- Email / SMTP (Gmail App Password in development) ---
+    # Optional at startup so the API can boot before mail is configured.
+    # SmtpEmailSender wiring must still validate these before sending.
+    smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str = Field(default="", alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    email_from: str = Field(default="", alias="EMAIL_FROM")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+
+    # OTP policy (centralized so services don't hardcode magic numbers)
+    otp_expire_minutes: int = Field(default=5, alias="OTP_EXPIRE_MINUTES")
+    otp_resend_cooldown_seconds: int = Field(
+        default=60,
+        alias="OTP_RESEND_COOLDOWN_SECONDS",
+    )
+    otp_max_attempts: int = Field(default=5, alias="OTP_MAX_ATTEMPTS")
+
+    # --- Firebase Cloud Messaging (optional — push disabled if unset) ---
+    firebase_credentials_path: str | None = Field(
+        default=None,
+        alias="FIREBASE_CREDENTIALS_PATH",
+        description="Path to Firebase Admin SDK service account JSON (relative to Pakclean_backend/ or absolute).",
+    )
 
     # --- CORS ---
     # Stored as a raw comma-separated string in .env; exposed as a list via property.

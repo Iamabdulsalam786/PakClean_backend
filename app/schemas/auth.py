@@ -1,73 +1,195 @@
 """
-Auth-related request and response schemas.
+Auth request/response schemas for email-verified registration + password reset.
+
+Matches mobile signup:
+  full_name, email, phone, password, confirm_password, role (customer|provider)
+
+Forgot-password flow DTOs:
+  ForgotPasswordRequest → VerifyResetOtpRequest → ResetPasswordRequest
+
+These DTOs validate INPUT/OUTPUT shapes only — no DB access here.
 """
 
-import re
+from __future__ import annotations
+
 from datetime import datetime
-from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.models.user import UserRole
 
-
-class SignupRole(str, Enum):
-    """Role selected on the mobile sign-up screen."""
-
-    CUSTOMER = "customer"
-    CLEANER = "cleaner"
+# Roles allowed on mobile signup (admin included for in-app admin onboarding; lock down in production via env later).
+SIGNUP_ROLES = {UserRole.CUSTOMER, UserRole.PROVIDER, UserRole.ADMIN}
+PUBLIC_ROLES = SIGNUP_ROLES
 
 
-_PASSWORD_UPPER = re.compile(r"[A-Z]")
-_PASSWORD_LOWER = re.compile(r"[a-z]")
-_PASSWORD_DIGIT = re.compile(r"\d")
-
-
-def validate_password_strength(password: str) -> str:
-    """Match PakClean mobile app password rules."""
-    if len(password) < 8:
-        raise ValueError("Password must be at least 8 characters")
-    if not _PASSWORD_UPPER.search(password):
-        raise ValueError("Password must contain at least one uppercase letter")
-    if not _PASSWORD_LOWER.search(password):
-        raise ValueError("Password must contain at least one lowercase letter")
-    if not _PASSWORD_DIGIT.search(password):
-        raise ValueError("Password must contain at least one number")
-    return password
+def _reject_non_public_role(role: UserRole) -> UserRole:
+    if role not in SIGNUP_ROLES:
+        raise ValueError("role must be 'customer', 'provider', or 'admin'")
+    return role
 
 
 class UserRegister(BaseModel):
-    """Body for POST /auth/register — creates account and sends email OTP."""
+    """Body for POST /auth/register."""
 
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=2, max_length=150)
-    phone: str | None = Field(default=None, max_length=20)
-    role: SignupRole = SignupRole.CUSTOMER
+    email: EmailStr
+    phone: str = Field(min_length=5, max_length=20)
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+    role: UserRole = UserRole.CUSTOMER
 
-    @field_validator("password")
+    @field_validator("role")
     @classmethod
-    def password_rules(cls, value: str) -> str:
-        return validate_password_strength(value)
+    def role_must_be_public(cls, value: UserRole) -> UserRole:
+        return _reject_non_public_role(value)
+
+    @field_validator("phone")
+    @classmethod
+    def phone_must_not_be_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("phone is required")
+        return cleaned
+
+    @model_validator(mode="after")
+    def passwords_must_match(self) -> UserRegister:
+        if self.password != self.confirm_password:
+            raise ValueError("password and confirm_password must match")
+        return self
+
+
+class RegisterResponse(BaseModel):
+    """Returned after register — no tokens until email is verified."""
+
+    message: str = "Registration successful. Please verify the OTP sent to your email."
+    email: EmailStr
+    user_id: UUID
+    email_delivered: bool = False
+    dev_code: str | None = None
 
 
 class UserLogin(BaseModel):
-    """Body for POST /auth/login (JSON)."""
+    """Body for POST /auth/login."""
 
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
 
 
-class Token(BaseModel):
-    """Access token response."""
+class TokenPair(BaseModel):
+    """Access + refresh tokens after verify-otp or login."""
 
     access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    role: UserRole
+
+
+class RefreshRequest(BaseModel):
+    """Body for POST /auth/refresh."""
+
+    refresh_token: str = Field(min_length=20, max_length=512)
+
+
+class RefreshResponse(BaseModel):
+    """Rotated token pair."""
+
+    access_token: str
+    refresh_token: str
     token_type: str = "bearer"
 
 
+class VerifyOtpRequest(BaseModel):
+    """Body for POST /auth/verify-otp."""
+
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class ResendOtpRequest(BaseModel):
+    """Body for POST /auth/resend-otp."""
+
+    email: EmailStr
+
+
+class MessageResponse(BaseModel):
+    """Generic message wrapper (resend, etc.)."""
+
+    message: str
+    email_delivered: bool = False
+    dev_code: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Forgot password / reset password
+# ---------------------------------------------------------------------------
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Body for POST /auth/forgot-password."""
+
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """
+    Always the same shape on success — anti-enumeration.
+
+    Do not reveal whether the email exists or is verified.
+    """
+
+    message: str = (
+        "If an account exists for this email, a password reset OTP has been sent."
+    )
+
+
+class VerifyResetOtpRequest(BaseModel):
+    """
+    Body for POST /auth/verify-reset-otp.
+
+    Validates the OTP only — does NOT consume it.
+    Final consume happens in reset-password (Approach B).
+    """
+
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class VerifyResetOtpResponse(BaseModel):
+    """OTP is valid and unused; client may proceed to set a new password."""
+
+    message: str = "OTP verified. You may now reset your password."
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """
+    Body for POST /auth/reset-password.
+
+    Re-checks OTP (Approach B), then sets the new password and revokes sessions.
+    """
+
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def passwords_must_match(self) -> ResetPasswordRequest:
+        if self.new_password != self.confirm_password:
+            raise ValueError("new_password and confirm_password must match")
+        return self
+
+
+class ResetPasswordResponse(BaseModel):
+    """Password changed; all refresh tokens revoked — client must log in again."""
+
+    message: str = "Password reset successful. Please log in with your new password."
+
+
 class UserRead(BaseModel):
-    """Safe public user representation."""
+    """Safe public user representation — never includes hashed_password."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -76,34 +198,16 @@ class UserRead(BaseModel):
     phone: str | None
     full_name: str
     role: UserRole
+    is_verified: bool
     is_active: bool
-    is_email_verified: bool
-    is_onboarding_complete: bool
     created_at: datetime
     updated_at: datetime
 
 
-class RegisterResponse(BaseModel):
-    """
-    Sign-up step 1 response — account created, OTP sent, no JWT yet.
-
-    Client navigates to the OTP screen after this.
-    """
-
-    user_id: UUID
-    email: EmailStr
-    role: SignupRole
-    otp_sent: bool = True
-    email_delivered: bool = False
-    expires_in_seconds: int
-    next_step: str = "verify_email"
-    dev_code: str | None = None
-
-
-class AuthSessionResponse(BaseModel):
-    """Login or OTP verify — JWT plus user profile and navigation hint."""
+# Backward-compatible aliases used by older otp/auth routes until we cut over.
+class Token(BaseModel):
+    """Legacy access-only token response (older endpoints)."""
 
     access_token: str
     token_type: str = "bearer"
-    user: UserRead
-    next_step: str
+    role: UserRole
