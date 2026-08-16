@@ -34,10 +34,16 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     debug: bool = Field(default=True, alias="DEBUG")
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
+    skip_provider_verification: bool = Field(
+        default=True,
+        alias="SKIP_PROVIDER_VERIFICATION",
+        description="When true, providers can create/publish listings without admin VERIFIED status. Set false in production.",
+    )
 
     # --- Server ---
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
+    upload_dir: str = Field(default="uploads", alias="UPLOAD_DIR")
 
     # --- Database ---
     database_url: str = Field(..., alias="DATABASE_URL")
@@ -54,36 +60,37 @@ class Settings(BaseSettings):
     )
     algorithm: str = Field(default="HS256", alias="ALGORITHM")
 
+    # --- Email / SMTP (Gmail App Password in development) ---
+    # Optional at startup so the API can boot before mail is configured.
+    # SmtpEmailSender wiring must still validate these before sending.
+    smtp_host: str = Field(default="smtp.gmail.com", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str = Field(default="", alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
+    email_from: str = Field(default="", alias="EMAIL_FROM")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+
+    # OTP policy (centralized so services don't hardcode magic numbers)
+    otp_expire_minutes: int = Field(default=5, alias="OTP_EXPIRE_MINUTES")
+    otp_resend_cooldown_seconds: int = Field(
+        default=60,
+        alias="OTP_RESEND_COOLDOWN_SECONDS",
+    )
+    otp_max_attempts: int = Field(default=5, alias="OTP_MAX_ATTEMPTS")
+
+    # --- Firebase Cloud Messaging (optional — push disabled if unset) ---
+    firebase_credentials_path: str | None = Field(
+        default=None,
+        alias="FIREBASE_CREDENTIALS_PATH",
+        description="Path to Firebase Admin SDK service account JSON (relative to Pakclean_backend/ or absolute).",
+    )
+
     # --- CORS ---
     # Stored as a raw comma-separated string in .env; exposed as a list via property.
     cors_origins_raw: str = Field(
         default="http://localhost:3000",
         alias="CORS_ORIGINS",
     )
-
-    # --- Email / SMTP (OTP delivery) ---
-    smtp_enabled: bool = Field(default=False, alias="SMTP_ENABLED")
-    smtp_host: str = Field(default="", alias="SMTP_HOST")
-    smtp_port: int = Field(default=587, alias="SMTP_PORT")
-    smtp_user: str = Field(default="", alias="SMTP_USER")
-    smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
-    smtp_from_email: str = Field(default="", alias="SMTP_FROM_EMAIL")
-    smtp_from_name: str = Field(default="PakClean", alias="SMTP_FROM_NAME")
-    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
-
-    # --- Email provider selection ---
-    # auto | resend | smtp | console
-    email_provider: str = Field(default="auto", alias="EMAIL_PROVIDER")
-
-    # Resend (recommended — one API key, works from localhost)
-    resend_api_key: str = Field(default="", alias="RESEND_API_KEY")
-    resend_from_email: str = Field(default="", alias="RESEND_FROM_EMAIL")
-    resend_from_name: str = Field(default="PakClean", alias="RESEND_FROM_NAME")
-
-    @field_validator("email_provider")
-    @classmethod
-    def normalize_email_provider(cls, value: str) -> str:
-        return value.strip().lower()
 
     @field_validator("app_env")
     @classmethod
@@ -104,18 +111,6 @@ class Settings(BaseSettings):
         elif url.startswith("postgresql://"):
             url = "postgresql+psycopg://" + url[len("postgresql://") :]
         return url
-
-    @property
-    def resend_from_display(self) -> str:
-        if self.resend_from_name:
-            return f"{self.resend_from_name} <{self.resend_from_email}>"
-        return self.resend_from_email
-
-    @property
-    def smtp_from_display(self) -> str:
-        if self.smtp_from_name:
-            return f"{self.smtp_from_name} <{self.smtp_from_email}>"
-        return self.smtp_from_email
 
     @property
     def cors_origins(self) -> list[str]:

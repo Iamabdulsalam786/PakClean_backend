@@ -1,5 +1,8 @@
 """
-Email OTP business logic aligned with sign-up → verify → login flow.
+Email OTP business logic: request and verify.
+
+Delivery is intentionally dumb for now (log + optional dev_code).
+Later swap in Resend/SendGrid without changing these rules.
 """
 
 import logging
@@ -10,21 +13,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.security import hash_password, verify_password
-from app.integrations.email import deliver_otp_email
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models.otp import OtpChallenge
-from app.models.user import User
-from app.schemas.otp import OtpRequestResponse
-from app.services.user_queries import get_user_by_email
+from app.models.user import User, UserRole
+from app.schemas.auth import PUBLIC_ROLES
+from app.schemas.otp import OtpRequestResponse, OtpVerifyResponse
 
 logger = logging.getLogger(__name__)
 
-OTP_EXPIRE_SECONDS = 300
+OTP_EXPIRE_SECONDS = 300  # 5 minutes
 OTP_MAX_ATTEMPTS = 5
 OTP_RESEND_COOLDOWN_SECONDS = 60
 
 
 class OtpError(Exception):
+    """Domain error for OTP failures — routes map codes to HTTP status."""
+
     def __init__(self, message: str, *, code: str = "otp_error") -> None:
         self.message = message
         self.code = code
@@ -32,11 +36,12 @@ class OtpError(Exception):
 
 
 def _generate_otp_code() -> str:
-    """Cryptographically secure 6-digit OTP (000000–999999)."""
+    """Cryptographically strong 6-digit code (000000–999999)."""
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
 def _latest_active_challenge(db: Session, email: str) -> OtpChallenge | None:
+    """Newest non-consumed challenge for this email (may still be expired)."""
     statement = (
         select(OtpChallenge)
         .where(
@@ -50,6 +55,11 @@ def _latest_active_challenge(db: Session, email: str) -> OtpChallenge | None:
 
 
 def request_email_otp(db: Session, email: str) -> OtpRequestResponse:
+    """
+    Create an OTP challenge and "send" it.
+
+    Always returns a generic success message (anti user-enumeration).
+    """
     normalized = email.lower().strip()
     now = datetime.now(timezone.utc)
 
@@ -72,31 +82,29 @@ def request_email_otp(db: Session, email: str) -> OtpRequestResponse:
     db.add(challenge)
     db.commit()
 
-    expires_minutes = OTP_EXPIRE_SECONDS // 60
-    delivery = deliver_otp_email(
-        to_email=normalized,
-        code=code,
-        expires_minutes=expires_minutes,
-    )
-
-    show_dev_code = settings.debug and not delivery.delivered
+    # Dev "email provider": log the code. Replace with real SMTP/API later.
+    logger.info("OTP for %s: %s (expires in %ss)", normalized, code, OTP_EXPIRE_SECONDS)
 
     return OtpRequestResponse(
         expires_in_seconds=OTP_EXPIRE_SECONDS,
-        email_delivered=delivery.delivered,
-        delivery_provider=delivery.provider if delivery.delivered else None,
-        dev_code=code if show_dev_code else None,
-        message=(
-            "Verification code sent to your email."
-            if delivery.delivered
-            else "Verification code generated. Check the app or backend logs (email not configured)."
-        ),
+        dev_code=code if settings.debug else None,
     )
 
 
-def verify_email_otp(db: Session, email: str, code: str):
-    """Verify OTP, mark email verified, return JWT + user."""
-    from app.services.auth_service import build_session_response
+def verify_email_otp(
+    db: Session,
+    email: str,
+    code: str,
+    *,
+    role: UserRole = UserRole.CUSTOMER,
+) -> OtpVerifyResponse:
+    """
+    Validate OTP, create user if needed (customer or provider), return access token.
+
+    `role` is used only when creating a new account; existing users keep their role.
+    """
+    if role not in PUBLIC_ROLES:
+        raise OtpError("Invalid role for registration", code="invalid_role")
 
     normalized = email.lower().strip()
     now = datetime.now(timezone.utc)
@@ -117,24 +125,35 @@ def verify_email_otp(db: Session, email: str, code: str):
         db.commit()
         raise OtpError("Invalid or expired code", code="otp_invalid")
 
-    user = get_user_by_email(db, normalized)
+    user = db.scalar(select(User).where(User.email == normalized))
+    is_new_user = False
     if user is None:
-        raise OtpError(
-            "No account found for this email. Please sign up first.",
-            code="otp_no_account",
+        # OTP can onboard customer or provider without a password.
+        local_part = normalized.split("@", maxsplit=1)[0] or "User"
+        user = User(
+            email=normalized,
+            full_name=local_part[:150],
+            hashed_password=None,
+            role=role,
+            is_active=True,
         )
-
-    if not user.is_active:
+        db.add(user)
+        is_new_user = True
+    elif not user.is_active:
         raise OtpError("Inactive user", code="inactive_user")
 
-    if user.is_email_verified:
-        raise OtpError("Email already verified. Please sign in.", code="otp_already_verified")
-
-    user.is_email_verified = True
+    # Success — consume so the code cannot be reused.
     challenge.consumed_at = now
-    db.add(user)
     db.add(challenge)
     db.commit()
     db.refresh(user)
 
-    return build_session_response(user)
+    token = create_access_token(
+        subject=str(user.id),
+        extra_claims={"role": user.role.value},
+    )
+    return OtpVerifyResponse(
+        access_token=token,
+        role=user.role,
+        is_new_user=is_new_user,
+    )

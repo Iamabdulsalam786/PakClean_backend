@@ -8,18 +8,19 @@
 
 ## 1. User roles
 
-| Role | Value | Who | Current support |
-|------|--------|-----|-----------------|
-| Customer | `customer` | End users booking services | Implemented (default on register / OTP) |
-| Provider | `provider` | Service professionals | Role exists; profile/onboarding later |
-| Admin | `admin` | Back-office operators | Role exists; admin APIs later |
+| Role | Value | Who | Public signup |
+|------|--------|-----|----------------|
+| Customer | `customer` | End users booking services | Yes (default) |
+| Provider | `provider` | Service professionals | Yes (`"role": "provider"`) |
+| Admin | `admin` | Back-office operators | **No** — never via public API |
 
 **Rules**
 
-- Public self-registration always creates `customer`.
-- Clients **cannot** set `role` on register (privilege escalation prevention).
-- Providers/admins are created by admin flows (planned) or seeded manually.
-- Authorization uses `require_roles(...)` dependency (ready for admin routes).
+- Public register / OTP signup accept only `customer` or `provider`.
+- Attempting `admin` on public endpoints → validation error.
+- Login and OTP verify work for **existing** users of any role (including admin seeded later).
+- JWT includes `role` claim; token JSON also returns `role` for the mobile apps.
+- Use `CurrentCustomer` / `CurrentProvider` dependencies for role-gated routes later.
 
 ---
 
@@ -77,8 +78,8 @@ Authorization: Bearer <access_token>
 1. Email stored lowercased; must be unique.
 2. Phone optional; if present, must be unique.
 3. Password hashed with bcrypt before insert.
-4. Role forced to `customer`.
-5. Returns access token (user is logged in immediately).
+4. Role: `customer` (default) or `provider` — never `admin` from client.
+5. Returns access token + `role` (user is logged in immediately).
 6. Duplicate email/phone → **409 Conflict**.
 
 ### Login (password)
@@ -100,8 +101,9 @@ Authorization: Bearer <access_token>
 8. In `DEBUG=true`, response may include `dev_code`; production must not.
 9. Delivery today: server log + optional `dev_code` (no real SMTP yet).
 10. Verify success: consume challenge (`consumed_at` set).
-11. If email has no user → create `customer` with `full_name` from email local-part, `hashed_password=NULL`.
-12. Inactive user → **403** (OTP not consumed).
+11. If email has no user → create account with requested `role` (`customer` or `provider`, default customer), `full_name` from email local-part, `hashed_password=NULL`.
+12. If user already exists → keep existing role (`role` in body ignored).
+13. Inactive user → **403** (OTP not consumed).
 
 ### Protected routes
 
